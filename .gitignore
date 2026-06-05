@@ -5,3 +5,9 @@ node_modules/
 Thumbs.db
 desktop.ini
 credentials.json
+*.mp4
+*.mov
+*.avi
+*.png
+*.jpg
+*.jpeg
