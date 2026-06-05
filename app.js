@@ -412,7 +412,11 @@ async function scanAirspace() {
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      const errMsg = errorData.error || `HTTP error! status: ${response.status}`;
+      const errDetail = errorData.detail || '';
+      const err = new Error(errMsg);
+      err.detail = errDetail;
+      throw err;
     }
     
     flights = await response.json();
@@ -427,7 +431,7 @@ async function scanAirspace() {
   } catch (error) {
     console.error('Scan error:', error);
     updateStatusBadge('offline');
-    renderError(error.message);
+    renderError(error.message, error.detail);
   } finally {
     // Re-enable controls and stop scanner rotation acceleration
     scanBtn.disabled = false;
@@ -613,10 +617,7 @@ function selectFlight(callsign) {
   }
 }
 
-/**
- * Render detailed error messages in case API issues occur
- */
-function renderError(message) {
+function renderError(message, detail = '') {
   flightCount.textContent = 'ERROR DETECTED';
   telemetryList.innerHTML = `
     <div class="empty-state error-card">
@@ -630,7 +631,7 @@ function renderError(message) {
       <h3>Radar Scan Failed</h3>
       <p>Could not load flight data from Express proxy backend.</p>
       <div class="error-details">
-        <strong>Details:</strong> ${message}<br>
+        <strong>Details:</strong> ${message}${detail ? `<br><small style="display:block;margin-top:5px;opacity:0.8;color:var(--color-danger)">${detail}</small>` : ''}<br>
         <em>Ensure you run 'node server.js' and the proxy has internet connectivity to OpenSky Network.</em>
       </div>
     </div>
