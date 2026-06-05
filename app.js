@@ -69,8 +69,41 @@ document.addEventListener('DOMContentLoaded', () => {
   // Try an initial check to verify server status
   checkServerStatus();
 
-  // Auto-scan on page load
+  // Auto-scan on page load then every 12 seconds
   scanAirspace();
+
+  const REFRESH_INTERVAL = 12; // seconds
+  let countdown = REFRESH_INTERVAL;
+
+  // Show countdown in the scan button label
+  const btnText = scanBtn.querySelector('.btn-text');
+  const originalBtnText = btnText ? btnText.textContent : 'Scan Skies';
+
+  function updateCountdown() {
+    if (!btnText) return;
+    if (scanBtn.disabled) {
+      // Scanning in progress — reset countdown
+      countdown = REFRESH_INTERVAL;
+      return;
+    }
+    countdown--;
+    if (countdown <= 0) {
+      countdown = REFRESH_INTERVAL;
+      scanAirspace();
+    } else {
+      btnText.textContent = `Next scan in ${countdown}s`;
+    }
+  }
+
+  // Reset label back after scan completes (watch disabled state)
+  const observer = new MutationObserver(() => {
+    if (!scanBtn.disabled && btnText && !btnText.textContent.includes('Next scan')) {
+      btnText.textContent = `Next scan in ${countdown}s`;
+    }
+  });
+  observer.observe(scanBtn, { attributes: true, attributeFilter: ['disabled'] });
+
+  setInterval(updateCountdown, 1000);
 });
 
 /**
