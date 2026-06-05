@@ -33,10 +33,21 @@ app.get('/api/planes', async (req, res) => {
     const lomin = req.query.lomin ? parseFloat(req.query.lomin) : NY_BOUNDS.lomin;
     const lomax = req.query.lomax ? parseFloat(req.query.lomax) : NY_BOUNDS.lomax;
 
-    const response = await axios.get(OPENSKY_URL, {
+    // Build request config - use Basic Auth if credentials are set (required on cloud hosts)
+    const requestConfig = {
       params: { lamin, lamax, lomin, lomax },
-      timeout: 10000 // 10 second timeout
-    });
+      timeout: 15000,
+      headers: { 'User-Agent': 'LookUp-FlightNotifier/1.0' }
+    };
+
+    if (process.env.OPENSKY_USERNAME && process.env.OPENSKY_PASSWORD) {
+      requestConfig.auth = {
+        username: process.env.OPENSKY_USERNAME,
+        password: process.env.OPENSKY_PASSWORD
+      };
+    }
+
+    const response = await axios.get(OPENSKY_URL, requestConfig);
 
     const states = response.data.states;
 
