@@ -9,25 +9,63 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.static(path.join(__dirname)));
 
-const OPENSKY_URL = 'https://opensky-network.org/api/states/all';
+const OPENSKY_API    = 'https://opensky-network.org/api/states/all';
+const OPENSKY_TOKEN_URL = 'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token';
+
+// Token cache
+let cachedToken = null;
+let tokenExpiresAt = 0;
+
+/**
+ * Fetches a Bearer token using OAuth2 client_credentials flow.
+ * Caches it until 60s before expiry.
+ */
+async function getAccessToken() {
+  const clientId     = process.env.OPENSKY_CLIENT_ID;
+  const clientSecret = process.env.OPENSKY_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) return null;
+
+  // Return cached token if still valid
+  if (cachedToken && Date.now() < tokenExpiresAt) {
+    return cachedToken;
+  }
+
+  console.log('[OAuth2] Fetching new access token...');
+  const params = new URLSearchParams();
+  params.append('grant_type',    'client_credentials');
+  params.append('client_id',     clientId);
+  params.append('client_secret', clientSecret);
+
+  const response = await axios.post(OPENSKY_TOKEN_URL, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    timeout: 10000
+  });
+
+  const { access_token, expires_in } = response.data;
+  cachedToken    = access_token;
+  tokenExpiresAt = Date.now() + (expires_in - 60) * 1000; // refresh 60s early
+
+  console.log('[OAuth2] Token acquired, expires in', expires_in, 's');
+  return cachedToken;
+}
 
 /**
  * GET /api/debug
- * Shows what env vars are detected — use this to verify Railway vars are set correctly.
  */
 app.get('/api/debug', (req, res) => {
   res.json({
-    hasUsername: !!process.env.OPENSKY_USERNAME,
-    usernameValue: process.env.OPENSKY_USERNAME || '(not set)',
-    hasPassword: !!process.env.OPENSKY_PASSWORD,
-    nodeVersion: process.version,
-    port: PORT
+    hasClientId:     !!process.env.OPENSKY_CLIENT_ID,
+    clientIdValue:   process.env.OPENSKY_CLIENT_ID || '(not set)',
+    hasClientSecret: !!process.env.OPENSKY_CLIENT_SECRET,
+    tokenCached:     !!cachedToken,
+    nodeVersion:     process.version,
+    port:            PORT
   });
 });
 
 /**
  * GET /api/planes
- * Fetches aircraft within a bounding box from OpenSky Network.
  */
 app.get('/api/planes', async (req, res) => {
   try {
@@ -37,33 +75,32 @@ app.get('/api/planes', async (req, res) => {
     const lomax = req.query.lomax ? parseFloat(req.query.lomax) : 0.4;
 
     const requestConfig = {
-      params: { lamin, lamax, lomin, lomax },
+      params:  { lamin, lamax, lomin, lomax },
       timeout: 15000,
       headers: { 'User-Agent': 'LookUp-FlightNotifier/1.0' }
     };
 
-    const user = process.env.OPENSKY_USERNAME;
-    const pass = process.env.OPENSKY_PASSWORD;
-
-    if (user && pass) {
-      requestConfig.auth = { username: user, password: pass };
-      console.log(`[OpenSky] Authenticating as: ${user}`);
+    // Try OAuth2 token if credentials are present
+    const token = await getAccessToken();
+    if (token) {
+      requestConfig.headers['Authorization'] = `Bearer ${token}`;
+      console.log('[OpenSky] Using Bearer token');
     } else {
       console.log('[OpenSky] No credentials — anonymous request');
     }
 
-    const response = await axios.get(OPENSKY_URL, requestConfig);
-    const states = response.data.states;
+    const response = await axios.get(OPENSKY_API, requestConfig);
+    const states   = response.data.states;
 
     if (!states || !Array.isArray(states)) {
       return res.json([]);
     }
 
-    const planes = states.map(state => ({
-      callsign:  state[1] ? state[1].trim() : 'UNKNOWN',
-      longitude: state[5] !== null ? Number(state[5]) : null,
-      latitude:  state[6] !== null ? Number(state[6]) : null,
-      altitude:  state[7] !== null ? Number(state[7]) : null
+    const planes = states.map(s => ({
+      callsign:  s[1] ? s[1].trim() : 'UNKNOWN',
+      longitude: s[5] !== null ? Number(s[5]) : null,
+      latitude:  s[6] !== null ? Number(s[6]) : null,
+      altitude:  s[7] !== null ? Number(s[7]) : null
     }));
 
     res.json(planes);
