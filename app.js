@@ -15,8 +15,8 @@ const telemetryList = document.getElementById('telemetryList');
 const markersOverlay = document.getElementById('markersOverlay');
 const flightCount = document.getElementById('flightCount');
 const radarScope = document.getElementById('radarScope');
-const statusPulse = document.getElementById('status-pulse');
-const statusText = document.getElementById('status-text');
+const statusText = document.getElementById('statusText');
+const radarCaption = document.getElementById('radarCaption');
 
 // DOM Elements - Location & Proximity Alerts Controls
 const detectLocationBtn = document.getElementById('detectLocationBtn');
@@ -37,10 +37,10 @@ let flights = [];
 let selectedFlightCallsign = null;
 let notifiedFlights = new Set(); // Track flights we have already notified to prevent spam
 
-// Default User Location (Center of NYC)
+// Default User Location — Iași, Romania
 let userLocation = {
-  latitude: 40.7128,
-  longitude: -74.0060
+  latitude: 47.1585,
+  longitude: 27.6014
 };
 let alertRadius = 5.0; // Proximity threshold in kilometers
 
@@ -122,19 +122,16 @@ async function checkServerStatus() {
  * @param {'online'|'offline'|'scanning'} status 
  */
 function updateStatusBadge(status) {
-  statusPulse.className = 'pulse-indicator';
+  if (!statusText) return;
   if (status === 'online') {
-    statusPulse.classList.add('status-online');
-    statusText.textContent = 'ONLINE';
-    statusText.style.color = 'var(--color-secondary)';
+    statusText.textContent = 'online';
+    statusText.className = 'header-status online';
   } else if (status === 'scanning') {
-    statusPulse.classList.add('status-scanning');
-    statusText.textContent = 'SCANNING';
-    statusText.style.color = 'var(--color-primary)';
+    statusText.textContent = 'scanning...';
+    statusText.className = 'header-status scanning';
   } else {
-    statusPulse.classList.add('status-offline');
-    statusText.textContent = 'OFFLINE';
-    statusText.style.color = 'var(--color-danger)';
+    statusText.textContent = 'offline';
+    statusText.className = 'header-status offline';
   }
 }
 
@@ -211,19 +208,16 @@ function requestNotificationPermission() {
 function updateNotificationButtonState() {
   if (!('Notification' in window)) {
     requestNotifyBtn.disabled = true;
-    notifyBtnText.textContent = 'Alerts Unsupported';
+    notifyBtnText.textContent = 'Unsupported';
     return;
   }
-
   const status = Notification.permission;
   if (status === 'granted') {
-    requestNotifyBtn.style.borderColor = 'var(--color-secondary)';
-    requestNotifyBtn.style.color = 'var(--color-secondary)';
-    notifyBtnText.textContent = 'Alerts Active';
+    notifyBtnText.textContent = 'Alerts on';
+    requestNotifyBtn.style.color = 'var(--orange-500)';
   } else if (status === 'denied') {
-    requestNotifyBtn.style.borderColor = 'var(--color-danger)';
-    requestNotifyBtn.style.color = 'var(--color-danger)';
-    notifyBtnText.textContent = 'Alerts Blocked';
+    notifyBtnText.textContent = 'Blocked';
+    requestNotifyBtn.style.opacity = '0.5';
   } else {
     notifyBtnText.textContent = 'Enable Alerts';
   }
@@ -391,17 +385,7 @@ async function scanAirspace() {
   radarScope.classList.add('scanning');
   updateStatusBadge('scanning');
   
-  telemetryList.innerHTML = `
-    <div class="empty-state">
-      <div class="btn-icon">
-        <svg viewBox="0 0 24 24" width="40" height="40" stroke="var(--color-primary)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
-        </svg>
-      </div>
-      <h3>Sweeping Radar Scope...</h3>
-      <p>Receiving state vectors from OpenSky Network API. This might take a few seconds.</p>
-    </div>
-  `;
+  telemetryList.innerHTML = `<div class="empty-msg"><p>Scanning the skies above you...</p></div>`;
 
   try {
     const response = await fetch(`${API_BASE}/api/planes?lamin=${BOUNDS.lamin}&lamax=${BOUNDS.lamax}&lomin=${BOUNDS.lomin}&lomax=${BOUNDS.lomax}`);
@@ -440,23 +424,14 @@ function renderDashboard() {
   telemetryList.innerHTML = '';
   
   // Update flight counter
-  flightCount.textContent = `${flights.length} ${flights.length === 1 ? 'PLANE' : 'PLANES'} DETECTED`;
+  flightCount.textContent = `${flights.length} flight${flights.length !== 1 ? 's' : ''}`;
 
   if (flights.length === 0) {
-    telemetryList.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">
-          <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </div>
-        <h3>No Flights in Airspace</h3>
-        <p>There are currently no aircraft reporting telemetry within your active radar scope. Try scanning again shortly.</p>
-      </div>
-    `;
+    telemetryList.innerHTML = `<div class="empty-msg"><p>No flights detected in your area right now.</p></div>`;
+    if (radarCaption) radarCaption.textContent = '0 flights in scope';
     return;
   }
+  if (radarCaption) radarCaption.textContent = `${flights.length} flight${flights.length !== 1 ? 's' : ''} in scope`;
 
   // Populate cards and radar dots
   flights.forEach(flight => {
@@ -502,8 +477,7 @@ function createRadarMarker(flight) {
   marker.style.top = `${boundedY}%`;
 
   marker.innerHTML = `
-    <div class="marker-pulse"></div>
-    <div class="marker-point"></div>
+    <div class="marker-dot"></div>
     <span class="marker-label">${flight.callsign}</span>
   `;
 
@@ -525,59 +499,19 @@ function createFlightCard(flight) {
   card.id = `card-${flight.callsign}`;
   card.dataset.callsign = flight.callsign;
 
-  // Convert meters altitude to feet for display
   const altFeet = flight.altitude !== null ? Math.round(flight.altitude * 3.28084) : null;
-  const altMeters = flight.altitude !== null ? Math.round(flight.altitude) : null;
-  const altDisplay = altFeet !== null ? `${altFeet.toLocaleString()} ft (${altMeters.toLocaleString()} m)` : 'N/A';
-  
-  const latDisplay = flight.latitude !== null ? flight.latitude.toFixed(4) : 'N/A';
-  const lonDisplay = flight.longitude !== null ? flight.longitude.toFixed(4) : 'N/A';
-
-  // Retrieve distance for proximity display (calculated in processProximityAlerts)
-  const distance = flight.distance;
-  const distDisplay = distance !== undefined ? `${distance.toFixed(2)} km` : null;
+  const altDisplay = altFeet !== null ? `${altFeet.toLocaleString()} ft` : '—';
+  const distDisplay = flight.distance !== undefined ? `${flight.distance.toFixed(1)} km` : null;
 
   card.innerHTML = `
-    <div class="card-main">
-      <div class="plane-badge">
-        <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-          <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-          <line x1="12" y1="22.08" x2="12" y2="12"></line>
-        </svg>
-      </div>
-      <div>
-        <h3 class="plane-callsign">${flight.callsign}</h3>
-        <div class="plane-details">
-          <div class="detail-row">
-            <span class="detail-label">Altitude:</span>
-            <span class="detail-value">${altDisplay}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">Position:</span>
-            <span class="detail-value">${latDisplay}°N, ${lonDisplay}°W</span>
-          </div>
-          ${distDisplay ? `
-          <div class="detail-row text-distance">
-            <span class="detail-label">Distance:</span>
-            <span class="detail-value" style="color: var(--color-primary); font-weight: 700;">${distDisplay}</span>
-          </div>
-          ` : ''}
-        </div>
-      </div>
-    </div>
-    <div class="card-action-arrow">
-      <svg viewBox="0 0 24 24" width="16" height="16" stroke="var(--text-muted)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="9 18 15 12 9 6"></polyline>
-      </svg>
+    <span class="card-callsign">${flight.callsign}</span>
+    <div class="card-meta">
+      <span>${altDisplay}</span>
+      ${distDisplay ? `<span>${distDisplay} away</span>` : ''}
     </div>
   `;
 
-  // Interactivity
-  card.addEventListener('click', () => {
-    selectFlight(flight.callsign);
-  });
-
+  card.addEventListener('click', () => selectFlight(flight.callsign));
   return card;
 }
 
@@ -615,22 +549,13 @@ function selectFlight(callsign) {
  * Render detailed error messages in case API issues occur
  */
 function renderError(message) {
-  flightCount.textContent = 'ERROR DETECTED';
+  flightCount.textContent = '0 flights';
+  if (radarCaption) radarCaption.textContent = 'Scan failed';
   telemetryList.innerHTML = `
-    <div class="empty-state error-card">
-      <div class="empty-icon" style="color: var(--color-danger)">
-        <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-          <line x1="12" y1="9" x2="12" y2="13"></line>
-          <line x1="12" y1="17" x2="12.01" y2="17"></line>
-        </svg>
-      </div>
-      <h3>Radar Scan Failed</h3>
-      <p>Could not load flight data from Express proxy backend.</p>
-      <div class="error-details">
-        <strong>Details:</strong> ${message}<br>
-        <em>Ensure you run 'node server.js' and the proxy has internet connectivity to OpenSky Network.</em>
-      </div>
+    <div class="error-state">
+      <strong>Scan failed</strong><br>
+      ${message}<br>
+      <small>Make sure the server is running with <code>node server.js</code></small>
     </div>
   `;
 }
